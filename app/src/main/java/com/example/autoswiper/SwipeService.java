@@ -17,16 +17,21 @@ import android.view.MotionEvent;
 import android.view.View;
 import android.view.WindowManager;
 import android.view.accessibility.AccessibilityEvent;
+import android.view.accessibility.AccessibilityNodeInfo;
 import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
 /**
- * 通用自动上滑服务（AutoSwiper v1.0）
+ * 通用自动滑动服务（AutoSwiper v1.1）
  *
- * - 每 1 秒执行一次「上滑」手势，任意 App 页面通用；
+ * - 每 1 秒执行一次滑动，任意 App 页面通用；
  * - 每次触点随机（起点 X/Y、终点 X/Y、轨迹弧度、时长均随机），不固定一个点；
- * - 悬浮窗常驻：一键 开始/停止；可拖动；实时显示剩余次数；
+ * - 主方向「向下滑」（看下面，原 v1.0 行为）；
+ * - 到底检测：连续 2 次滑动页面内容无变化 → 判定到底，自动切换到反向「向上滑」（看上面）；
+ *   反向滑动执行「可设置的次数」后，回到主方向继续 —— 如此来回循环自动刷
+ *   （反弹次数 = 0 时关闭该特性，退化为纯向下滑）；
+ * - 悬浮窗常驻：一键 开始/停止；可拖动；实时显示剩余次数 / 反弹状态；
  * - 设定次数滑完自动停止，但悬浮窗保留，可再次一键开始。
  *
  * 悬浮窗使用 TYPE_ACCESSIBILITY_OVERLAY：无障碍服务专用层，
@@ -39,6 +44,9 @@ public class SwipeService extends AccessibilityService {
     /** 固定节拍：1 秒 1 次。 */
     private static final long TICK_MS = 1000;
 
+    /** 连续多少次页面无变化判定为「到底」。 */
+    private static final int STABLE_THRESHOLD = 2;
+
     private Handler handler;
     private Runnable tickRunnable;
 
@@ -47,6 +55,14 @@ public class SwipeService extends AccessibilityService {
     private int total = 0;
     private int remaining = 0;
     private int doneCount = 0;
+
+    /** 到底检测状态。 */
+    private String lastFingerprint = "";
+    private int stableCount = 0;
+
+    /** 反弹（反向滑动）状态。 */
+    private int reverseRemaining = 0;
+    private boolean reverseMode = false;
 
     private WindowManager wm;
     private DisplayMetrics dm;
@@ -93,6 +109,10 @@ public class SwipeService extends AccessibilityService {
         total = Prefs.getTotalSwipes(this);
         remaining = total;
         doneCount = 0;
+        stableCount = 0;
+        lastFingerprint = "";
+        reverseRemaining = 0;
+        reverseMode = false;
         running = true;
         updateUi();
     }
@@ -125,24 +145,63 @@ public class SwipeService extends AccessibilityService {
     private void tick() {
         if (!running) return;
 
+        // 总次数已耗尽（仅有限模式）：自动停止，悬浮窗保留
+        if (total > 0 && remaining <= 0) {
+            running = false;
+            updateUi();
+            return;
+        }
+
+        // ---------- 反弹阶段：执行反向「向上滑」（看上面） ----------
+        if (reverseRemaining > 0) {
+            boolean ok = performRandomSwipeDown();
+            if (ok) {
+                doneCount++;
+                if (total > 0) remaining--;
+            }
+            reverseRemaining--;
+            if (reverseRemaining <= 0) {
+                // 反弹结束，回到主方向继续（循环）
+                reverseMode = false;
+                stableCount = 0;
+                lastFingerprint = "";
+            }
+            updateUi();
+            return;
+        }
+
+        // ---------- 主阶段：执行「向下滑」（看下面），并检测是否到底 ----------
+        String cur = fingerprint();
+        if (!lastFingerprint.isEmpty() && cur.equals(lastFingerprint)) {
+            stableCount++;
+        } else {
+            stableCount = 0;
+        }
+        lastFingerprint = cur;
+
         boolean ok = performRandomSwipeUp();
         if (ok) {
             doneCount++;
-            if (total > 0) {
-                remaining--;
-                if (remaining <= 0) {
-                    // 次数已到：自动停止，但悬浮窗保留
-                    running = false;
-                }
+            if (total > 0) remaining--;
+        }
+
+        // 连续 N 次页面无变化 → 判定到底，触发反弹
+        if (stableCount >= STABLE_THRESHOLD) {
+            int rc = Prefs.getReverseCount(this);
+            if (rc > 0) {
+                reverseRemaining = rc;
+                reverseMode = true;
             }
+            // 无论是否反弹，都重置检测，避免连续误判
+            stableCount = 0;
+            lastFingerprint = "";
         }
         updateUi();
     }
 
     /**
-     * 随机触点上滑：起点 X 在屏宽 30%~70%、起点 Y 在屏高 65%~82%，
-     * 终点 Y 在 18%~35%，终点 X 带随机横向偏移，中段带随机弧度，
-     * 手势时长 250~450ms —— 每一次都不一样。
+     * 随机触点「向下滑」（看下面）：起点在屏下 65%~82%，终点在屏上 18%~35%，
+     * 终点 X 带随机横向偏移，中段带随机弧度，手势时长 250~450ms。
      */
     private boolean performRandomSwipeUp() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) return false;
@@ -157,6 +216,31 @@ public class SwipeService extends AccessibilityService {
         int endY = (int) (h * (0.18 + Math.random() * 0.17));     // 0.18~0.35
         int duration = 250 + (int) (Math.random() * 200);         // 250~450ms
 
+        return dispatchSwipe(startX, startY, endX, endY, duration, w);
+    }
+
+    /**
+     * 随机触点「向上滑」（看上面）：与向下滑相反，起点在屏上 18%~35%，
+     * 终点在屏下 65%~82%，其余随机逻辑一致。
+     */
+    private boolean performRandomSwipeDown() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) return false;
+
+        int w = dm.widthPixels;
+        int h = dm.heightPixels;
+
+        int startX = (int) (w * (0.30 + Math.random() * 0.40));   // 0.30~0.70
+        int startY = (int) (h * (0.18 + Math.random() * 0.17));   // 0.18~0.35
+        int endX = clamp(startX + (int) ((Math.random() - 0.5) * w * 0.12),
+                (int) (w * 0.15), (int) (w * 0.85));
+        int endY = (int) (h * (0.65 + Math.random() * 0.17));     // 0.65~0.82
+        int duration = 250 + (int) (Math.random() * 200);         // 250~450ms
+
+        return dispatchSwipe(startX, startY, endX, endY, duration, w);
+    }
+
+    private boolean dispatchSwipe(int startX, int startY, int endX, int endY,
+                                  int duration, int w) {
         Path path = new Path();
         path.moveTo(startX, startY);
         int midX = (startX + endX) / 2 + (int) ((Math.random() - 0.5) * w * 0.06);
@@ -170,6 +254,35 @@ public class SwipeService extends AccessibilityService {
 
     private static int clamp(int v, int lo, int hi) {
         return Math.max(lo, Math.min(hi, v));
+    }
+
+    /**
+     * 页面内容指纹：采样根节点可见文本拼接。连续多次相同 → 页面未变 → 判定到底。
+     * 仅取前若干字符，控制开销（1 秒 1 次足够）。
+     */
+    private String fingerprint() {
+        AccessibilityNodeInfo root = getRootInActiveWindow();
+        if (root == null) return "none";
+        StringBuilder sb = new StringBuilder();
+        traverse(root, sb, 0);
+        try {
+            root.recycle();
+        } catch (Exception ignore) {
+        }
+        String s = sb.toString();
+        return s.length() > 1500 ? s.substring(0, 1500) : s;
+    }
+
+    private void traverse(AccessibilityNodeInfo n, StringBuilder sb, int depth) {
+        if (n == null || depth > 10 || sb.length() >= 1500) return;
+        CharSequence t = n.getText();
+        if (t != null && t.length() > 0) {
+            sb.append(t).append('|');
+        }
+        int c = n.getChildCount();
+        for (int i = 0; i < c; i++) {
+            traverse(n.getChild(i), sb, depth + 1);
+        }
     }
 
     // ---------- 悬浮窗 ----------
@@ -297,7 +410,9 @@ public class SwipeService extends AccessibilityService {
         String mode = Prefs.getMode(this);
         int value = Prefs.getValue(this);
         if (running) {
-            if (total > 0) {
+            if (reverseMode) {
+                statusText.setText("反弹中（向上滑）剩余 " + reverseRemaining + " 次");
+            } else if (total > 0) {
                 statusText.setText("运行中：剩余 " + remaining + " 次 / 共 " + total);
             } else {
                 statusText.setText("运行中：已滑 " + doneCount + " 次（无限模式）");
@@ -312,7 +427,8 @@ public class SwipeService extends AccessibilityService {
                 String setting = Prefs.MODE_TIME.equals(mode)
                         ? (value == 0 ? "无限" : value + " 秒")
                         : (value == 0 ? "无限" : value + " 次");
-                statusText.setText("待机 · 设定：" + setting);
+                statusText.setText("待机 · 设定：" + setting
+                        + " · 反弹 " + Prefs.getReverseCount(this) + " 次");
             }
             toggleBtn.setText("开始");
         }

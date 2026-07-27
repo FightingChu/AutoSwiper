@@ -72,6 +72,30 @@
             android:hint="次数或秒数（0 = 无限，1 秒 1 次两者等价）"
             android:inputType="number" />
 
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:text="到底反弹设置"
+            android:textSize="16sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="滑动中检测到页面到底无法继续时，自动反向向上滑指定次数，再回到原方向循环"
+            android:textSize="12sp"
+            android:textColor="#888888" />
+
+        <EditText
+            android:id="@+id/reverse_input"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:hint="到底后向上滑次数（0 = 不反弹，纯向下滑）"
+            android:inputType="number" />
+
         <Button
             android:id="@+id/save_btn"
             android:layout_width="match_parent"

@@ -12,6 +12,7 @@ public final class Prefs {
     private static final String FILE = "autoswiper_prefs";
     private static final String KEY_MODE = "mode";       // count | time
     private static final String KEY_VALUE = "value";     // 次数或秒数
+    private static final String KEY_REVERSE = "reverse"; // 到底后反向(向上)滑动次数
 
     public static final String MODE_COUNT = "count";
     public static final String MODE_TIME = "time";
@@ -43,5 +44,14 @@ public final class Prefs {
     /** 本次任务总滑动次数（time 模式下 1 秒 1 次，秒数即次数）。0=无限。 */
     public static int getTotalSwipes(Context c) {
         return getValue(c);
+    }
+
+    /** 到底后反向（向上滑）次数。0 = 不反弹，保持纯向下滑。默认 10。 */
+    public static int getReverseCount(Context c) {
+        return sp(c).getInt(KEY_REVERSE, 10);
+    }
+
+    public static void setReverseCount(Context c, int v) {
+        sp(c).edit().putInt(KEY_REVERSE, Math.max(0, v)).apply();
     }
 }

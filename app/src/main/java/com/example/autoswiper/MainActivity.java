@@ -25,6 +25,7 @@ public class MainActivity extends AppCompatActivity {
     private RadioButton modeCount;
     private RadioButton modeTime;
     private EditText valueInput;
+    private EditText reverseInput;
     private TextView serviceState;
 
     @Override
@@ -36,6 +37,7 @@ public class MainActivity extends AppCompatActivity {
         modeCount = findViewById(R.id.mode_count);
         modeTime = findViewById(R.id.mode_time);
         valueInput = findViewById(R.id.value_input);
+        reverseInput = findViewById(R.id.reverse_input);
         serviceState = findViewById(R.id.service_state);
         Button saveBtn = findViewById(R.id.save_btn);
         Button accBtn = findViewById(R.id.acc_btn);
@@ -47,6 +49,7 @@ public class MainActivity extends AppCompatActivity {
             modeCount.setChecked(true);
         }
         valueInput.setText(String.valueOf(Prefs.getValue(this)));
+        reverseInput.setText(String.valueOf(Prefs.getReverseCount(this)));
 
         saveBtn.setOnClickListener(v -> save());
         accBtn.setOnClickListener(v ->
@@ -75,9 +78,24 @@ public class MainActivity extends AppCompatActivity {
         boolean isTime = modeGroup.getCheckedRadioButtonId() == R.id.mode_time;
         Prefs.setMode(this, isTime ? Prefs.MODE_TIME : Prefs.MODE_COUNT);
         Prefs.setValue(this, v);
+
+        // 到底反弹次数（0 = 不反弹，保持纯向下滑）
+        String rawR = reverseInput.getText().toString().trim();
+        int r = 0;
+        if (!TextUtils.isEmpty(rawR)) {
+            try {
+                r = Integer.parseInt(rawR);
+            } catch (NumberFormatException e) {
+                Toast.makeText(this, "反弹次数不合法", Toast.LENGTH_SHORT).show();
+                return;
+            }
+        }
+        Prefs.setReverseCount(this, r);
+
         String unit = isTime ? "秒" : "次";
         Toast.makeText(this,
-                "已保存：" + (v == 0 ? "无限滑动" : v + " " + unit + "（1 秒 1 次）"),
+                "已保存：" + (v == 0 ? "无限滑动" : v + " " + unit + "（1 秒 1 次）")
+                        + " · 到底反弹 " + r + " 次",
                 Toast.LENGTH_SHORT).show();
     }
 
