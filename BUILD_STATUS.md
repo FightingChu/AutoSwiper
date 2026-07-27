@@ -39,4 +39,12 @@
   - `Prefs`：新增 `getReverseCount/setReverseCount`（KEY_REVERSE，默认 10，0=不反弹）
   - `MainActivity` + `activity_main.xml`：新增「到底反弹设置」输入框，保存时一并持久化
   - 悬浮窗反弹时显示「反弹中（向上滑）剩余 N 次」
-- 构建目标：app-debug.apk（v1.1）
+- 构建目标（v1.1）：仓库根 `AutoSwiper.apk`（5.4MB，已改名）
+
+## 产物命名（2026-07-27 15:59）
+
+- 用户要求：构建产物不要叫 app-debug，要带项目名 AutoSwiper
+- 实现：`app/build.gradle` 用 `applicationVariants.all` 设 `outputFileName`：debug → `AutoSwiper.apk`，release → `AutoSwiper-release.apk`
+  （注意：AGP 新版 `archivesBaseName` 已不在 `defaultConfig`，必须走 `applicationVariants`，否则报 `Could not find method archivesBaseName()`）
+- 仓库根已用 `AutoSwiper.apk` 替换旧 `app-debug.apk`（git rename），已 push `28c3910`
+- `versionName` 升至 1.1、`versionCode` 2
