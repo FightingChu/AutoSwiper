@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 不限定 packageNames：任意 App 页面均可滑动（通用版） -->
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:accessibilityEventTypes="typeWindowStateChanged"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:notificationTimeout="100"
+    android:description="@string/accessibility_desc"
+    android:canPerformGestures="true"
+    android:accessibilityFlags="flagDefault" />

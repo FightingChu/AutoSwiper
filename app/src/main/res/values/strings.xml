@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">AutoSwiper</string>
+    <string name="accessibility_desc">AutoSwiper 自动上滑：每 1 秒模拟一次随机触点的上滑手势，用于自动翻页/刷视频。开启后屏幕上会出现可拖动的悬浮窗，一键开始/停止。</string>
+</resources>
