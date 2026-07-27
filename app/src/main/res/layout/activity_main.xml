@@ -110,12 +110,20 @@
             android:layout_marginTop="8dp"
             android:text="去开启无障碍服务" />
 
+        <Button
+            android:id="@+id/float_btn"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="悬浮窗开关（需先开启无障碍）"
+            android:enabled="false" />
+
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="24dp"
             android:lineSpacingExtra="4dp"
-            android:text="使用步骤：\n1. 设置滑动次数或时长，点「保存设置」\n2. 点「去开启无障碍服务」，找到 AutoSwiper 并开启\n3. 开启后悬浮窗自动出现，切到任意 App，点悬浮窗「开始」\n4. 次数滑完自动停止（悬浮窗保留），可随时再开始/停止\n5. 悬浮窗可按住拖动位置"
+            android:text="使用步骤：\n1. 设置滑动次数或时长，点「保存设置」\n2. 点「去开启无障碍服务」，找到 AutoSwiper 并开启\n3. 返回本页点「显示悬浮窗」调出悬浮窗（开启无障碍不会自动弹窗）\n4. 切到任意 App，点悬浮窗「开始」；次数滑完自动停止（悬浮窗保留）\n5. 悬浮窗可按住拖动；贴边静止 3 秒自动收缩为小圆点，点圆点再展开\n6. 不用时可点「隐藏悬浮窗」收起"
             android:textSize="13sp"
             android:textColor="#666666" />
     </LinearLayout>

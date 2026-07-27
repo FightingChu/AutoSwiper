@@ -17,7 +17,7 @@ import androidx.appcompat.app.AppCompatActivity;
 
 /**
  * 设置页：滑动模式（按次数 / 按时长）与数值，
- * 并引导开启无障碍服务（开启后悬浮窗自动出现）。
+ * 引导开启无障碍服务；悬浮窗由本页「显示/隐藏悬浮窗」按钮控制（开启无障碍不直接弹窗）。
  */
 public class MainActivity extends AppCompatActivity {
 
@@ -27,6 +27,7 @@ public class MainActivity extends AppCompatActivity {
     private EditText valueInput;
     private EditText reverseInput;
     private TextView serviceState;
+    private Button floatBtn;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -39,6 +40,7 @@ public class MainActivity extends AppCompatActivity {
         valueInput = findViewById(R.id.value_input);
         reverseInput = findViewById(R.id.reverse_input);
         serviceState = findViewById(R.id.service_state);
+        floatBtn = findViewById(R.id.float_btn);
         Button saveBtn = findViewById(R.id.save_btn);
         Button accBtn = findViewById(R.id.acc_btn);
 
@@ -54,12 +56,34 @@ public class MainActivity extends AppCompatActivity {
         saveBtn.setOnClickListener(v -> save());
         accBtn.setOnClickListener(v ->
                 startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)));
+
+        // 悬浮窗显隐：仅在无障碍已开启时可点，发送广播给服务
+        floatBtn.setOnClickListener(v -> {
+            if (!isServiceEnabled()) return;
+            boolean on = Prefs.getOverlayOn(this);
+            Intent i = new Intent(on ? SwipeService.ACTION_HIDE_FLOAT
+                    : SwipeService.ACTION_SHOW_FLOAT);
+            i.setPackage(getPackageName());
+            sendBroadcast(i);
+            Prefs.setOverlayOn(this, !on);
+            updateFloatBtn();
+        });
     }
 
     @Override
     protected void onResume() {
         super.onResume();
         refreshServiceState();
+    }
+
+    private void updateFloatBtn() {
+        boolean svc = isServiceEnabled();
+        floatBtn.setEnabled(svc);
+        if (!svc) {
+            floatBtn.setText("悬浮窗开关（需先开启无障碍）");
+            return;
+        }
+        floatBtn.setText(Prefs.getOverlayOn(this) ? "隐藏悬浮窗" : "显示悬浮窗");
     }
 
     private void save() {
@@ -102,8 +126,9 @@ public class MainActivity extends AppCompatActivity {
     private void refreshServiceState() {
         boolean on = isServiceEnabled();
         serviceState.setText(on
-                ? "✅ 无障碍服务已开启，悬浮窗应已显示"
+                ? "✅ 无障碍服务已开启：点下方「显示悬浮窗」调出悬浮窗"
                 : "❌ 无障碍服务未开启：点击下方按钮 → 找到「AutoSwiper」→ 开启");
+        updateFloatBtn();
     }
 
     private boolean isServiceEnabled() {

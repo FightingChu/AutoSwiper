@@ -13,6 +13,7 @@ public final class Prefs {
     private static final String KEY_MODE = "mode";       // count | time
     private static final String KEY_VALUE = "value";     // 次数或秒数
     private static final String KEY_REVERSE = "reverse"; // 到底后反向(向上)滑动次数
+    private static final String KEY_OVERLAY = "overlay_on"; // 悬浮窗是否显示
 
     public static final String MODE_COUNT = "count";
     public static final String MODE_TIME = "time";
@@ -53,5 +54,14 @@ public final class Prefs {
 
     public static void setReverseCount(Context c, int v) {
         sp(c).edit().putInt(KEY_REVERSE, Math.max(0, v)).apply();
+    }
+
+    /** 悬浮窗是否显示（由 App 内按钮控制）。默认 false（开启无障碍不直接弹窗）。 */
+    public static boolean getOverlayOn(Context c) {
+        return sp(c).getBoolean(KEY_OVERLAY, false);
+    }
+
+    public static void setOverlayOn(Context c, boolean on) {
+        sp(c).edit().putBoolean(KEY_OVERLAY, on).apply();
     }
 }

@@ -2,6 +2,10 @@ package com.example.autoswiper;
 
 import android.accessibilityservice.AccessibilityService;
 import android.accessibilityservice.GestureDescription;
+import android.content.BroadcastReceiver;
+import android.content.Context;
+import android.content.Intent;
+import android.content.IntentFilter;
 import android.graphics.Color;
 import android.graphics.Path;
 import android.graphics.PixelFormat;
@@ -23,7 +27,7 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 
 /**
- * 通用自动滑动服务（AutoSwiper v1.1）
+ * 通用自动滑动服务（AutoSwiper v1.2）
  *
  * - 每 1 秒执行一次滑动，任意 App 页面通用；
  * - 每次触点随机（起点 X/Y、终点 X/Y、轨迹弧度、时长均随机），不固定一个点；
@@ -31,13 +35,17 @@ import android.widget.TextView;
  * - 到底检测：连续 2 次滑动页面内容无变化 → 判定到底，自动切换到反向「向上滑」（看上面）；
  *   反向滑动执行「可设置的次数」后，回到主方向继续 —— 如此来回循环自动刷
  *   （反弹次数 = 0 时关闭该特性，退化为纯向下滑）；
- * - 悬浮窗常驻：一键 开始/停止；可拖动；实时显示剩余次数 / 反弹状态；
+ * - 悬浮窗：由 App 内按钮「显示/隐藏」控制，开启无障碍服务时不再自动弹窗；
+ *   悬浮窗静止超过 3 秒且贴边时，自动收缩为小圆点，点击圆点再次展开；
  * - 设定次数滑完自动停止，但悬浮窗保留，可再次一键开始。
  *
  * 悬浮窗使用 TYPE_ACCESSIBILITY_OVERLAY：无障碍服务专用层，
  * 无需 SYSTEM_ALERT_WINDOW 权限（避开国产 ROM 悬浮窗权限限制）。
  */
 public class SwipeService extends AccessibilityService {
+
+    public static final String ACTION_SHOW_FLOAT = "com.example.autoswiper.SHOW_FLOAT";
+    public static final String ACTION_HIDE_FLOAT = "com.example.autoswiper.HIDE_FLOAT";
 
     private static final String TAG = "AutoSwiper";
 
@@ -46,6 +54,12 @@ public class SwipeService extends AccessibilityService {
 
     /** 连续多少次页面无变化判定为「到底」。 */
     private static final int STABLE_THRESHOLD = 2;
+
+    /** 悬浮窗静止多久后尝试自动收缩（毫秒）。 */
+    private static final long IDLE_COLLAPSE_MS = 3000;
+
+    /** 判定「贴边」的屏幕边缘留白阈值（dp）。 */
+    private static final float EDGE_MARGIN_DP = 24;
 
     private Handler handler;
     private Runnable tickRunnable;
@@ -66,10 +80,36 @@ public class SwipeService extends AccessibilityService {
 
     private WindowManager wm;
     private DisplayMetrics dm;
-    private View overlay;
+
+    // ---------- 悬浮窗状态 ----------
+    private View overlay;        // 当前挂在窗口上的视图（panel 或 dot）
+    private View panelView;      // 展开态：完整面板
+    private View dotView;        // 收缩态：小圆点
     private WindowManager.LayoutParams overlayLp;
     private TextView statusText;
     private Button toggleBtn;
+
+    private boolean overlayShown = false;  // 是否显示（HIDE 时为 false）
+    private boolean collapsed = false;     // 是否处于收缩小圆点态
+    private long lastInteract = 0;         // 上次交互时间（用于自动收缩）
+
+    private BroadcastReceiver floatReceiver;
+
+    private final Runnable idleCheck = new Runnable() {
+        @Override
+        public void run() {
+            if (!overlayShown || collapsed) return;
+            long idle = System.currentTimeMillis() - lastInteract;
+            if (idle >= IDLE_COLLAPSE_MS && isNearEdge()) {
+                collapseOverlay();
+                return;
+            }
+            // 未满足：继续轮询，直到收缩或再次交互
+            if (handler != null) {
+                handler.postDelayed(this, 500);
+            }
+        }
+    };
 
     // ---------- 生命周期 ----------
 
@@ -79,7 +119,24 @@ public class SwipeService extends AccessibilityService {
         handler = new Handler(Looper.getMainLooper());
         wm = (WindowManager) getSystemService(WINDOW_SERVICE);
         dm = getResources().getDisplayMetrics();
-        showOverlay();
+
+        // 注册悬浮窗显隐广播：开启无障碍服务时【不】自动弹窗，由 App 按钮控制
+        floatReceiver = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context ctx, Intent i) {
+                String a = i.getAction();
+                if (ACTION_SHOW_FLOAT.equals(a)) {
+                    showOverlay();
+                } else if (ACTION_HIDE_FLOAT.equals(a)) {
+                    hideOverlay();
+                }
+            }
+        };
+        IntentFilter f = new IntentFilter();
+        f.addAction(ACTION_SHOW_FLOAT);
+        f.addAction(ACTION_HIDE_FLOAT);
+        registerReceiver(floatReceiver, f);
+
         startLoop();
         Log.d(TAG, "service connected");
     }
@@ -96,8 +153,16 @@ public class SwipeService extends AccessibilityService {
 
     @Override
     public void onDestroy() {
-        if (handler != null && tickRunnable != null) {
+        if (floatReceiver != null) {
+            try {
+                unregisterReceiver(floatReceiver);
+            } catch (Exception ignore) {
+            }
+            floatReceiver = null;
+        }
+        if (handler != null) {
             handler.removeCallbacks(tickRunnable);
+            handler.removeCallbacks(idleCheck);
         }
         removeOverlay();
         super.onDestroy();
@@ -285,11 +350,124 @@ public class SwipeService extends AccessibilityService {
         }
     }
 
-    // ---------- 悬浮窗 ----------
+    // ---------- 悬浮窗显隐 ----------
 
+    /** 由 App 按钮发送 SHOW_FLOAT 触发：显示悬浮窗（展开态）。 */
     private void showOverlay() {
-        if (wm == null || overlay != null) return;
+        if (wm == null || overlayShown) return;
+        ensureViewsBuilt();
+        overlayShown = true;
+        collapsed = false;
+        swapView(panelView);
+        noteInteraction();
+        updateUi();
+    }
 
+    /** 由 App 按钮发送 HIDE_FLOAT 触发：隐藏整个悬浮窗（保留引用，便于再次显示）。 */
+    private void hideOverlay() {
+        overlayShown = false;
+        collapsed = false;
+        if (handler != null) handler.removeCallbacks(idleCheck);
+        if (overlay != null) {
+            try {
+                wm.removeView(overlay);
+            } catch (Exception ignore) {
+            }
+            overlay = null;
+        }
+    }
+
+    /** 彻底移除（服务销毁时），清空所有引用。 */
+    private void removeOverlay() {
+        if (wm != null && overlay != null) {
+            try {
+                wm.removeView(overlay);
+            } catch (Exception ignore) {
+            }
+        }
+        overlay = null;
+        panelView = null;
+        dotView = null;
+        statusText = null;
+        toggleBtn = null;
+    }
+
+    /** 在 panel 与 dot 之间切换当前窗口内容（位置 x/y 保持）。 */
+    private void swapView(View v) {
+        if (overlay != null) {
+            try {
+                wm.removeView(overlay);
+            } catch (Exception ignore) {
+            }
+        }
+        overlay = v;
+        try {
+            wm.addView(overlay, overlayLp);
+        } catch (Exception e) {
+            Log.e(TAG, "overlay add failed", e);
+            overlay = null;
+        }
+    }
+
+    /** 收缩为小圆点。 */
+    private void collapseOverlay() {
+        if (!overlayShown || collapsed) return;
+        collapsed = true;
+        if (handler != null) handler.removeCallbacks(idleCheck);
+        swapView(dotView);
+    }
+
+    /** 从圆点展开回完整面板。 */
+    private void expandOverlay() {
+        if (!overlayShown || !collapsed) return;
+        collapsed = false;
+        swapView(panelView);
+        noteInteraction();
+        updateUi();
+    }
+
+    /** 记录一次交互，重置「静止计时」。 */
+    private void noteInteraction() {
+        lastInteract = System.currentTimeMillis();
+        if (handler != null) {
+            handler.removeCallbacks(idleCheck);
+            handler.postDelayed(idleCheck, IDLE_COLLAPSE_MS);
+        }
+    }
+
+    /** 当前窗口是否贴边（距任一屏幕边缘 < 阈值）。 */
+    private boolean isNearEdge() {
+        if (panelView == null || overlayLp == null) return false;
+        int w = panelView.getWidth();
+        int h = panelView.getHeight();
+        if (w == 0 || h == 0) return false;
+        float th = EDGE_MARGIN_DP * dm.density;
+        int screenW = dm.widthPixels;
+        int screenH = dm.heightPixels;
+        return overlayLp.x <= th
+                || overlayLp.y <= th
+                || overlayLp.x + w >= screenW - th
+                || overlayLp.y + h >= screenH - th;
+    }
+
+    private void ensureViewsBuilt() {
+        if (overlayLp == null) {
+            float d = dm.density;
+            overlayLp = new WindowManager.LayoutParams(
+                    WindowManager.LayoutParams.WRAP_CONTENT,
+                    WindowManager.LayoutParams.WRAP_CONTENT,
+                    overlayWindowType(),
+                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+                    PixelFormat.TRANSLUCENT);
+            overlayLp.gravity = Gravity.TOP | Gravity.START;
+            overlayLp.x = (int) (80 * d);
+            overlayLp.y = (int) (160 * d);
+        }
+        if (panelView == null) buildPanel();
+        if (dotView == null) buildDot();
+    }
+
+    private void buildPanel() {
         float d = dm.density;
         int pad = (int) (10 * d);
 
@@ -324,18 +502,9 @@ public class SwipeService extends AccessibilityService {
             } else {
                 startTask();
             }
+            noteInteraction();
         });
         panel.addView(toggleBtn);
-
-        overlayLp = new WindowManager.LayoutParams(
-                WindowManager.LayoutParams.WRAP_CONTENT,
-                WindowManager.LayoutParams.WRAP_CONTENT,
-                overlayWindowType(),
-                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
-                PixelFormat.TRANSLUCENT);
-        overlayLp.gravity = Gravity.TOP | Gravity.START;
-        overlayLp.x = (int) (12 * d);
-        overlayLp.y = (int) (120 * d);
 
         // 整个面板可拖动；短按（位移极小）不拦截，按钮仍可点
         panel.setOnTouchListener(new View.OnTouchListener() {
@@ -351,6 +520,7 @@ public class SwipeService extends AccessibilityService {
                         lpX = overlayLp.x;
                         lpY = overlayLp.y;
                         dragging = false;
+                        noteInteraction();
                         return false;
                     case MotionEvent.ACTION_MOVE:
                         int dx = (int) e.getRawX() - downX;
@@ -374,27 +544,27 @@ public class SwipeService extends AccessibilityService {
             }
         });
 
-        overlay = panel;
-        try {
-            wm.addView(overlay, overlayLp);
-        } catch (Exception e) {
-            Log.e(TAG, "overlay add failed", e);
-            overlay = null;
-            return;
-        }
-        updateUi();
+        panelView = panel;
     }
 
-    private void removeOverlay() {
-        if (wm != null && overlay != null) {
-            try {
-                wm.removeView(overlay);
-            } catch (Exception ignore) {
-            }
-            overlay = null;
-            statusText = null;
-            toggleBtn = null;
-        }
+    private void buildDot() {
+        float d = dm.density;
+        int size = (int) (44 * d);
+
+        TextView dot = new TextView(this);
+        dot.setText("↕");
+        dot.setTextColor(Color.WHITE);
+        dot.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18);
+        dot.setGravity(Gravity.CENTER);
+        dot.setMinWidth(size);
+        dot.setMinHeight(size);
+        GradientDrawable dotBg = new GradientDrawable();
+        dotBg.setShape(GradientDrawable.OVAL);
+        dotBg.setColor(0xDD444444);
+        dot.setBackground(dotBg);
+        dot.setOnClickListener(v -> expandOverlay());
+
+        dotView = dot;
     }
 
     /** TYPE_ACCESSIBILITY_OVERLAY 免权限；API<27 回退 TYPE_PHONE。 */
@@ -406,6 +576,7 @@ public class SwipeService extends AccessibilityService {
     }
 
     private void updateUi() {
+        if (!overlayShown || collapsed) return;
         if (statusText == null || toggleBtn == null) return;
         String mode = Prefs.getMode(this);
         int value = Prefs.getValue(this);
