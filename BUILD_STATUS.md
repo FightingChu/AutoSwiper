@@ -2,19 +2,19 @@
 
 > 本文件是构建/交付状态的真相源，实时更新。
 
-## 当前状态：✅ APK 构建成功（v1.0）
+## 当前状态：✅ APK 构建成功（v1.2）
 
 | 项 | 状态 |
 |----|------|
-| 工程代码 | ✅ 完成（v1.0） |
-| debug APK | ✅ BUILD SUCCESSFUL（2026-07-27，5.4MB） |
-| git 提交 | ✅ 已提交 |
-| GitHub 推送 | ✅ 已推送（2026-07-27 15:27）https://github.com/FightingChu/AutoSwiper |
+| 工程代码 | ✅ 完成（v1.2） |
+| debug APK | ✅ BUILD SUCCESSFUL（2026-07-27 16:21，5.4MB） |
+| git 提交 | ✅ 已提交（bc8a0bd） |
+| GitHub 推送 | ✅ 已推送 https://github.com/FightingChu/AutoSwiper |
 
 ## 产物路径
 
-- APK（仓库根目录）：`app-debug.apk`
-- APK（构建输出）：`app/build/outputs/apk/debug/app-debug.apk`
+- APK（仓库根目录）：`AutoSwiper.apk`
+- APK（构建输出）：`app/build/outputs/apk/debug/AutoSwiper.apk`
 
 ## 环境
 
@@ -48,3 +48,14 @@
   （注意：AGP 新版 `archivesBaseName` 已不在 `defaultConfig`，必须走 `applicationVariants`，否则报 `Could not find method archivesBaseName()`）
 - 仓库根已用 `AutoSwiper.apk` 替换旧 `app-debug.apk`（git rename），已 push `28c3910`
 - `versionName` 升至 1.1、`versionCode` 2
+
+## v1.2 — 悬浮窗可控显隐 + 自动收缩（2026-07-27 16:21）
+
+- 需求①：开启无障碍不直接弹悬浮窗，改为 App 内「显示/隐藏悬浮窗」按钮控制。
+  - 实现：`SwipeService.onServiceConnected()` 删除 `showOverlay()` 调用；新增 `SHOW_FLOAT`/`HIDE_FLOAT` 广播（动态注册 `BroadcastReceiver`），由 `MainActivity.float_btn` 发送并持久化 `Prefs.overlay_on`。
+  - `MainActivity`：按钮仅无障碍已开启时可用；文案随状态切换「显示/隐藏悬浮窗」。
+- 需求②：悬浮窗贴边且静止 >3 秒自动收缩为小圆点，点圆点再展开。
+  - 实现：新增 `idleCheck` Runnable（静止 3s 轮询，贴边 <24dp 触发 `collapseOverlay`）；`dotView` 小圆点点击 `expandOverlay`；拖动/点按钮 `noteInteraction()` 重置计时。
+  - 默认展开位置 x=80dp,y=160dp（避开贴边，避免一弹出就收缩）。
+- `Prefs`：新增 `getOverlayOn/setOverlayOn`（KEY_OVERLAY，默认 false）。
+- `versionName` 1.2、`versionCode` 3；已 push `bc8a0bd`。
